@@ -105,15 +105,14 @@ class SpotifyMediaProperty:
         """
         self._user = user
 
-    def copy_meta_to_str(self, file_path_compat: bool = True, string: str) -> str:
+    def copy_meta_to_str(self, string: str, file_path_compat: bool = True) -> str:
         """
         Copies meta to fstring formatted string
         :param file_path_compat: Strip unsupported characters from string to make them filename compatible
         :param string: Fstring compatible string
         :return: str: Formatted string
         """
-        all_props = {}
-        for
+        return string
 
 
     @property
