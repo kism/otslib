@@ -1,7 +1,7 @@
 import re
 from typing import Tuple
 from ..core.mediaitem import *
-from ..expections import UnknownURLTypeException
+from ..exceptions import UnknownURLTypeException
 
 URL_TYPES: dict = {
     'TRACK':    [

@@ -29,5 +29,6 @@ class StreamReadException(Exception):
 class InvalidCredentialException(Exception):
     pass
 
+
 class UnknownURLTypeException(Exception):
     pass

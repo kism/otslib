@@ -4,8 +4,7 @@ from typing import Union, TYPE_CHECKING
 from ..common.formating import metadata_list_to_string
 from ..common.utils import cached_request
 from ..core.__base__ import AbstractMediaItem, AbstractMediaCollection
-from ..expections import LyricsUnavailableException
-import subprocess
+from ..exceptions import LyricsUnavailableException
 
 if TYPE_CHECKING:
     from ..core.user import SpotifyUser

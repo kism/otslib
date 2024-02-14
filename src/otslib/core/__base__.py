@@ -8,7 +8,7 @@ from PIL import Image
 from librespot.audio import PlayableContentFeeder
 from librespot.audio.decoders import AudioQuality, VorbisOnlyAudioQuality
 from librespot.metadata import TrackId, EpisodeId
-from ..expections import MedaFetchInterruptedException, ThumbnailUnavailableException, UnknownMediaTypeException, \
+from ..exceptions import MedaFetchInterruptedException, ThumbnailUnavailableException, UnknownMediaTypeException, \
     UnplayableMediaException, StreamReadException
 from ..common.utils import pick_thumbnail, MutableBool
 from mutagen.oggvorbis import OggVorbis
@@ -114,7 +114,6 @@ class SpotifyMediaProperty:
         """
         return string
 
-
     @property
     def session_token(self) -> str:
         """
@@ -124,7 +123,6 @@ class SpotifyMediaProperty:
         if self.__token is None:
             self.__token = self._user.session.tokens().get("user-read-email")
         return self.__token
-
 
     @property
     def req_header(self) -> dict:
@@ -365,7 +363,7 @@ class AbstractMediaItem(SpotifyMediaProperty):
         thread.start()
         estimated_playback_end_on: float = 0.0  # Estimated time when all received bytes would have finished playing
         next_frame_critical_time: float = 0.0  # Time within which, next audio chunk should be available for smooth play
-        last_frame_on: int  = int(time.time())
+        last_frame_on: int = int(time.time())
         while True:
             try:
                 if int(time.time()) - last_frame_on > 15:

@@ -13,9 +13,9 @@ if TYPE_CHECKING:
 def media_items_uri(items: list[SpotifyTrackMedia | SpotifyEpisodeMedia], action: str = 'removed from') -> list[str]:
     uris = []
     for item in items:
-        if type(item) == SpotifyTrackMedia:
+        if item is SpotifyTrackMedia:
             uris.append(f'spotify:track:{item.id}')
-        elif type(item) == SpotifyEpisodeMedia:
+        elif item is SpotifyEpisodeMedia:
             uris.append(f'spotify:episode:{item.id}')
         else:
             raise TypeError(f'Object of type "{type(item)}" cannot be {action} playlist')
@@ -362,12 +362,12 @@ class SpotifyUser:
         for key in valid_params_heads:
             all_valids.append(f'min_{key}')
             all_valids.append(f'max_{key}')
-            all_valids.append(f'takget_{key}')
+            all_valids.append(f'target_{key}')
 
         # Fill the auto-fetched values
         for key in auto_audio_params:
-            if 'target_'+key in all_valids:
-                audio_params['target_'+key] = auto_audio_params[key]
+            if 'target_' + key in all_valids:
+                audio_params['target_' + key] = auto_audio_params[key]
         # Override and fill user set params
         for key in user_audio_params:
             if key in all_valids:
@@ -380,7 +380,8 @@ class SpotifyUser:
             headers=self.req_header
         )
         if req.status_code != 200:
-            raise RuntimeError(f'Error with spotify API, "{recommendation_api}", response {req.status_code}: {req.text}')
+            raise RuntimeError(
+                f'Error with spotify API, "{recommendation_api}", response {req.status_code}: {req.text}')
         for track in json.loads(req.content)['tracks']:
             track_instance = SpotifyTrackMedia(track['id'], user=self)
             date_segments: list = track['album']['release_date'].split("-")
