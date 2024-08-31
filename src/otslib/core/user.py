@@ -1,8 +1,14 @@
 from ..core.mediaitem import SpotifyPlaylist, SpotifyTrackMedia, SpotifyEpisodeMedia, SpotifyArtist
 from ..common.utils import pick_thumbnail, GENRES
+from librespot.zeroconf import ZeroconfServer
+from librespot.proto import Connect_pb2 as Connect
+from librespot import util as ls_util
 from typing import Union, TYPE_CHECKING
+import threading
 import importlib
 import requests
+import random
+import time
 import os
 import json
 
@@ -85,6 +91,56 @@ class SpotifyUser:
         session = py_librespot.Session.Builder(conf=config).user_pass(username, password).create()
         profile = SpotifyUser(session_path=session_path, session=session)
         profile.uuid = uuid
+        return profile
+
+    @staticmethod
+    def from_zeroconf(save_session: bool = False, session_path: Union[str, None] = None, uuid: str = '') -> 'SpotifyUser':
+        """
+        Create aa SpotifyUser instance using zeroconf login
+        :param save_session: Set to true in order to save loggedin session to a JSON file
+        :param uuid: UUID, Optional for tracking
+        :param session_path: Path where the created session will be saved
+        :return: SpotifyUser Instance
+        """
+
+        # clientID field is required
+        CLIENT_ID: str = "65b708073fc0480ea92a077233ca87bd"
+        # Make sure the save path is valid, if session saving is enabled
+        if session_path is not None:
+            if os.path.isfile(session_path) and save_session:
+                raise RuntimeError('File already exists at session_path')
+            if save_session:
+                if not session_path.endswith('.json'):
+                    raise RuntimeError("session_path must be a JSON file path")
+                os.makedirs(os.path.dirname(session_path), exist_ok=True)
+
+        # Prepare ZeroconfServer
+        ZeroconfServer._ZeroconfServer__default_get_info_fields['clientID'] = CLIENT_ID
+        zs_builder = ZeroconfServer.Builder()
+        zs_builder.device_type = Connect.DeviceType.COMPUTER
+        zs_builder.device_name = 'OTS Connector'
+        zs_builder.conf.store_credentials = save_session if session_path is not None else False
+        if session_path is not None:
+            zs_builder.conf.stored_credentials_file = session_path
+        zserver = zs_builder.create()
+        profile: Union[None, SpotifyUser] = None
+        ex: Union[None, Exception] = None
+        try:
+            while True:
+                time.sleep(1)
+                if zserver.has_valid_session():
+                    # Login was successful
+                    profile = SpotifyUser(
+                        session_path=session_path if session_path is not None else '',
+                        session=zserver._ZeroconfServer__session
+                        )
+                    profile.uuid = uuid
+                    break
+        except KeyboardInterrupt:
+            ex = KeyboardInterrupt("Login session interrupted by user..")
+        zserver.close()
+        if ex is not None:
+            raise ex
         return profile
 
     def auth_token_scoped(self, scope: str = "user-read-email") -> str:

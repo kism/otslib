@@ -18,9 +18,10 @@ class SpotifyTrackMedia(AbstractMediaItem):
         :param user: SpotifyUser to use
         :param http_cache: Path to directory where http request to spotify are cached
         """
+        super().__init__(media_id=track_id, media_type=0)
         self.http_cache = os.path.abspath(http_cache) if http_cache is not None else None
         self.set_user(user)
-        super().__init__(media_id=track_id, media_type=0)
+
 
     def _fetch_metadata(self) -> None:
         """
@@ -187,9 +188,9 @@ class SpotifyEpisodeMedia(AbstractMediaItem):
         :param user:  SpotifyUser to use
         :param http_cache: Path to directory where http request to spotify are cached
         """
+        super().__init__(media_id=episode_id, media_type=1)
         self.http_cache = os.path.abspath(http_cache) if http_cache is not None else None
         self.set_user(user)
-        super().__init__(media_id=episode_id, media_type=1)
 
     def _fetch_metadata(self) -> None:
         """
@@ -245,9 +246,6 @@ class SpotifyEpisodeMedia(AbstractMediaItem):
 
 
 class SpotifyAlbum(AbstractMediaCollection):
-    _items_id: Union[list[str], None] = None
-    _collection_class: SpotifyTrackMedia = SpotifyTrackMedia
-
     def __init__(self, album_id: str, user: 'SpotifyUser', http_cache: Union[str, None] = None) -> None:
         """
         Initializes instance of SpotifyAlbum class representing a spotify album
@@ -256,9 +254,10 @@ class SpotifyAlbum(AbstractMediaCollection):
         :param http_cache: Path to directory where http request to spotify are cached
         :return: None
         """
+        super().__init__(collection_id=album_id)
+        self._collection_class: SpotifyTrackMedia = SpotifyTrackMedia
         self.http_cache = os.path.abspath(http_cache) if http_cache is not None else None
         self.set_user(user)
-        super().__init__(collection_id=album_id)
 
     def _fetch_metadata(self) -> None:
         """
@@ -334,9 +333,6 @@ class SpotifyAlbum(AbstractMediaCollection):
 
 
 class SpotifyArtist(AbstractMediaCollection):
-    _items_id: Union[list[str], None] = None
-    _collection_class: SpotifyAlbum = SpotifyAlbum
-
     def __init__(self, artist_id: str, user: 'SpotifyUser', http_cache: Union[str, None] = None) -> None:
         """
         Initializes instance of SpotifyArtist class representing a spotify artist
@@ -345,9 +341,10 @@ class SpotifyArtist(AbstractMediaCollection):
         :param http_cache: Path to directory where http request to spotify are cached
         :return: None
         """
+        super().__init__(collection_id=artist_id)
+        self._collection_class: SpotifyAlbum = SpotifyAlbum
         self.http_cache = os.path.abspath(http_cache) if http_cache is not None else None
         self.set_user(user)
-        super().__init__(collection_id=artist_id)
 
     def _fetch_metadata(self) -> None:
         """
@@ -391,8 +388,7 @@ class SpotifyArtist(AbstractMediaCollection):
 
 
 class SpotifyPlaylist(AbstractMediaCollection):
-    _items_id: Union[list[str], None] = None
-    _collection_class: SpotifyTrackMedia = SpotifyTrackMedia
+
 
     def __init__(self, playlist_id: str, user: 'SpotifyUser', http_cache: Union[str, None] = None) -> None:
         """
@@ -402,9 +398,11 @@ class SpotifyPlaylist(AbstractMediaCollection):
         :param http_cache: Path to directory where http request to spotify are cached
         :return: None
         """
+        super().__init__(collection_id=playlist_id)
+        self._collection_class: SpotifyTrackMedia = SpotifyTrackMedia
+        self.__added_by: dict = {}
         self.http_cache = os.path.abspath(http_cache) if http_cache is not None else None
         self.set_user(user)
-        super().__init__(collection_id=playlist_id)
 
     def _fetch_metadata(self) -> None:
         """
@@ -412,7 +410,7 @@ class SpotifyPlaylist(AbstractMediaCollection):
         :return: None
         """
         fields = "name,description,followers,images,id,external_urls," \
-                 "name,owner(id,display_name,external_urls),tracks.items(track(id)),tracks.next"
+                 "name,owner(id,display_name,external_urls),tracks.items(added_by.id,track.id),tracks.next"
         playlist_api: str = f'https://api.spotify.com/v1/playlists/{self.id}?fields={fields}&market=from_token'
         playlist_info: dict = json.loads(cached_request(self.http_cache, 0, playlist_api, headers=self.req_header))
         self._covers = playlist_info['images']
@@ -433,16 +431,30 @@ class SpotifyPlaylist(AbstractMediaCollection):
             '_raw_metadata': playlist_info,
         }
         self._items_id: list[str] = []
+        self.__added_by = {}
         while True:
+            print('tracks' in playlist_info.keys(), playlist_info.keys())
             for item in playlist_info['tracks']['items']:
                 self._items_id.append(item['track']['id'])
+                self.__added_by[item['track']['id']] = item['added_by']['id']
             if playlist_info['tracks']['next']:
-                playlist_info = json.loads(
-                    cached_request(self.http_cache, 0, playlist_info['tracks']['next'], headers=self.req_header)
+                # Fix the uri so it actually works
+                next_uri_fixed: str = playlist_info['tracks']['next'].replace(f'fields={fields}', 'next,items(added_by.id,track.id)')
+                tracks_api_resp: dict = json.loads(
+                    cached_request(self.http_cache, 0, next_uri_fixed, headers=self.req_header)
                 )
+                playlist_info = {}
+                playlist_info['tracks'] = tracks_api_resp
             else:
                 break
         self._FULL_METADATA_ACQUIRED = True
+
+    # TODO: See it this actually works as expected
+    def get_added_by_user(track: SpotifyTrackMedia) -> SpotifyArtist:
+        if track.id in self.__added_by:
+            return SpotifyArtist(artist_id=self.__added_by[track.id], user=self._user)
+        else:
+            TrackNotInPlaylistException(f"The track {track.id} is not in playlist {self.id}")
 
     @property
     def tracks(self) -> list[SpotifyTrackMedia]:
@@ -470,8 +482,6 @@ class SpotifyPlaylist(AbstractMediaCollection):
 
 
 class SpotifyPodcast(AbstractMediaCollection):
-    _items_id: Union[list[str], None] = None
-    _collection_class: SpotifyEpisodeMedia = SpotifyEpisodeMedia
 
     def __init__(self, podcast_id: str, user: 'SpotifyUser', http_cache: Union[str, None] = None) -> None:
         """
@@ -481,9 +491,10 @@ class SpotifyPodcast(AbstractMediaCollection):
         :param http_cache: Path to directory where http request to spotify are cached
         :return: None
         """
+        super().__init__(collection_id=podcast_id)
+        self._collection_class: SpotifyEpisodeMedia = SpotifyEpisodeMedia
         self.http_cache = os.path.abspath(http_cache) if http_cache is not None else None
         self.set_user(user)
-        super().__init__(collection_id=podcast_id)
 
     def _fetch_metadata(self) -> None:
         """

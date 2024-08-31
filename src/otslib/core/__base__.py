@@ -1,16 +1,19 @@
+import os
 import subprocess
 import threading
 import time
-from typing import Optional, Any, Union, TYPE_CHECKING
+from typing import Callable, Generator, Optional, Any, Union, TYPE_CHECKING
 from io import BytesIO
 import requests
 from PIL import Image
 from librespot.audio import PlayableContentFeeder
 from librespot.audio.decoders import AudioQuality, VorbisOnlyAudioQuality
 from librespot.metadata import TrackId, EpisodeId
-from ..exceptions import MedaFetchInterruptedException, ThumbnailUnavailableException, UnknownMediaTypeException, \
-    UnplayableMediaException, StreamReadException
-from ..common.utils import pick_thumbnail, MutableBool
+
+from ..common.formating import sanitize_string
+from ..exceptions import MediaFetchInterruptedException, ThumbnailUnavailableException, UnknownMediaTypeException, \
+    UnplayableMediaException, StreamReadException, PremiumRequiredException
+from ..common.utils import pick_thumbnail, MutableBool, flatten_dictionary
 from mutagen.oggvorbis import OggVorbis
 import mutagen
 
@@ -22,13 +25,6 @@ class SpotifyMediaProperty:
     """
     This class defines the base for Media and Media Collection classe, and houses common functions for similar tasks
     """
-    __id: Union[str, None] = None
-    _covers: Union[list[dict], None] = None
-    _metadata: Union[dict, None] = None
-    _thumbnail: Union[BytesIO, None] = None
-    _user: Union['SpotifyUser', None] = None
-    __token: Union[str, None] = None
-    _FULL_METADATA_ACQUIRED: bool = False
 
     def __init__(self, media_id: str):
         """
@@ -36,7 +32,13 @@ class SpotifyMediaProperty:
         :param media_id:  ID of media / media collection
         :return:
         """
-        self.__id = media_id
+        self.__id: str = media_id
+        self._covers: list[dict] = []
+        self._metadata: dict = {}
+        self._thumbnail: Union[BytesIO, None] = None
+        self._user: Union['SpotifyUser', None] = None
+        self.__token: Union[str, None] = None
+        self._FULL_METADATA_ACQUIRED: bool = False
 
     def _fetch_metadata(self) -> None:
         """
@@ -105,13 +107,46 @@ class SpotifyMediaProperty:
         """
         self._user = user
 
-    def copy_meta_to_str(self, string: str, file_path_compat: bool = True) -> str:
+    def copy_meta_to_str(self, string: str, is_filepath: bool = True, use_lookalikes_in_path: bool = True) -> str:
         """
-        Copies meta to fstring formatted string
-        :param file_path_compat: Strip unsupported characters from string to make them filename compatible
-        :param string: Fstring compatible string
+        Copies meta to string containing formatters
+
+        :param string: String
+        :param is_filepath: If true, does file path related sanitization to string
+        :param use_lookalikes_in_path: Use similar looking unicodes characters for characters that are not allowed in filenames
         :return: str: Formatted string
         """
+        flattened_meta: dict = flatten_dictionary(self._metadata)
+
+        # TODO: Use recursive replacement or something else to process collections properly as well
+        if is_filepath and use_lookalikes_in_path:
+            for key, value in flattened_meta:
+                if value is str:
+                    if os.name == 'nt':
+                        # Windows specific replacements
+                        # Since metadata should not cause path separation, we can do that here safely
+                        value = value.replace('\\', '⧵')  # 29FS  REVERSE SOLIDUS OPERATOR FOR WINDOWS PATH SEP
+                        value = value.replace('*', '𐌟')  # 1031F OLD ITALIC LETTER ESS
+                        value = value.replace('?', 'ॽ')  # 097D DEVANAGARI LETTER GLOTTAL STOP
+                        value = value.replace('<', 'ᐸ')  # 1438 CANADIAN SYLLABICS PA
+                        value = value.replace('>', 'ᐳ')  # 1433 CANADIAN SYLLABICS PO
+                        value = value.replace('"', '″')  # 2033 DOUBLE PRIME
+                        # TODO: Get a windows system to check if '|' and ':' can be used in filenames/path
+                        # Replacements: '|' -> 'ǀ' 01C0 LATIN LETTER DENTAL CLICK
+                        #               ':' -> '։' 0589 ARMENIAN FULL STOP
+                    else:
+                        value = value.replace('/', '⁄')   # 2044 FRACTION SLASH FOR LINUX PATH SEP
+                    flattened_meta[key] = value
+        elif is_filepath and not use_lookalikes_in_path:
+            for key, value in flattened_meta:
+                if value is str:
+                    # Since this string has is_filepath set to True, meta should not cause path seperation
+                    if os.name == 'nt':
+                        value = value.replace('\\', '-')
+                    else:
+                        value = value.replace('/', '-')
+                    flattened_meta[key] = value
+        string = sanitize_string(string.format(**flattened_meta))
         return string
 
     @property
@@ -170,10 +205,6 @@ class SpotifyMediaProperty:
 
 
 class AbstractMediaItem(SpotifyMediaProperty):
-    # Media Type 0 is songs, 1 is podcast
-    __media_type: Optional[int] = None
-    __use_audio_quality: Union[AudioQuality, None] = None
-    __stream: Union[PlayableContentFeeder.LoadedStream, None] = None
 
     def __init__(self, media_id: str, media_type: int) -> None:
         """
@@ -183,6 +214,9 @@ class AbstractMediaItem(SpotifyMediaProperty):
         Zero for tracks and one for episodes
         """
         self.__media_type = media_type
+        # Media Type 0 is songs, 1 is podcast
+        self.__use_audio_quality: AudioQuality = AudioQuality.HIGH
+        self.__stream: Union[PlayableContentFeeder.LoadedStream, None] = None
         super().__init__(media_id=media_id)
 
     def set_media_quality(self, quality: AudioQuality) -> None:
@@ -200,7 +234,7 @@ class AbstractMediaItem(SpotifyMediaProperty):
         """
         self.__stream = None
 
-    def get_media(self, chunk_size: int = 50000, stop_check_list: Union[list, None] = None, pg_notify=None,
+    def get_media(self, chunk_size: int = 50000, stop_check_list: Union[list, None] = None, pg_notify: Callable = print,
                   skip_at_end_bytes: int = 167) -> bytes:
         """
         Fetches the full audio media for the media object
@@ -236,7 +270,7 @@ class AbstractMediaItem(SpotifyMediaProperty):
             stop_check_list.pop(stop_check_list.index(self.id))
             pg_notify(0, 1, 'Cancelled')
             self.reset_stream()
-            raise MedaFetchInterruptedException('Fetch interrupted by external event')
+            raise MediaFetchInterruptedException('Fetch interrupted by external event')
         self.reset_stream()
         return raw_media
 
@@ -245,6 +279,9 @@ class AbstractMediaItem(SpotifyMediaProperty):
         Returns the media stream for the current spotify media with set user
         :return: LoadedStream
         """
+
+        if not user.is_premium and int(os.environ.get('OTSLIB_DEBUG_MSTREAM', 0)) == 0:
+            raise PremiumRequiredException('Spotify premium is required for media playback and stream')
         if self.__stream is not None:
             return self.__stream
 
@@ -265,7 +302,7 @@ class AbstractMediaItem(SpotifyMediaProperty):
             if self.__media_type == 0 else \
             EpisodeId.from_base62(self.meta_scraped_id)
         try:
-            self.__stream = user.session.content_feeder().load(
+            self.__stream: PlayableContentFeeder.LoadedStream = user.session.content_feeder().load(
                 media_id, VorbisOnlyAudioQuality(quality), False, None
             )
         except RuntimeError as e:
@@ -427,27 +464,26 @@ class AbstractMediaItem(SpotifyMediaProperty):
 
 
 class AbstractMediaCollection(SpotifyMediaProperty):
-    _items_id: Union[list[str], None] = None
-    _items_partial_meta: dict = {}
-    _collection_class: Any = None
-
     def __init__(self, collection_id: str) -> None:
         """
         Base Class for media collection entities like playlist, albums, etc.
         :param collection_id: Spotify ID of the collection
         """
         super().__init__(media_id=collection_id)
+        self._items_id: Union[list[str], None] = None
+        self._items_partial_meta: dict = {}
+        self._collection_class: Any = None
 
     def __len__(self):
         return self.length
 
     @property
-    def items(self) -> list:
+    def items(self) -> Generator[Any, Any, Any]:
         """
         Returns list of items this collection holds
         :return: a list of items: Track, Playlists, Episodes
         """
-        if self._items_id is None and self._FULL_METADATA_ACQUIRED is False:
+        if (self._items_id is None or self.length == 0) and self._FULL_METADATA_ACQUIRED is False:
             # If the item list is not yet created and full meta was not fetched, fetch it now
             self._fetch_metadata()
         for item_id in self._items_id:

@@ -15,21 +15,22 @@ def sanitize_string(
     """
     if string is None:
         return ''
-    sanitize = ['*', '?', '<', '>', '"'] if os.name == 'nt' else []
+    sanitize = ['*', '?', '<', '>', '"'] if os.name == 'nt' else []  # Characters that will be removed from string
     if os.name == 'nt':
-        string = string.replace('/', '\\')
+        string = string.replace('/', '\\')  # Use correct path separators in Windows systems
     if not skip_path_seps:
+        # If path separators is not to be skipped add it to list of characters to be removed
         sanitize.append(os.path.sep)
     for i in sanitize:
         string = string.replace(i, '')
     if os.name == 'nt':
-        string = string.replace('|', '-')
+        string = string.replace('|', '-')  # Remove | from string as windows does not allow it
         drive_letter, tail = os.path.splitdrive(string)
         string = os.path.join(
             drive_letter,
-            tail.replace(':', '-')
+            tail.replace(':', '-')  # Remove : from string as windows does not allow it
         )
-        string = string.rstrip('.')
+        string = string.rstrip('.')  # Windows does not support dot(.) at the end of path
     else:
         if escape_quotes and '"' in string:
             # Since convert uses double quotes, we may need to escape if it
