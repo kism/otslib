@@ -1,4 +1,4 @@
-from ..core.mediaitem import SpotifyPlaylist, SpotifyTrackMedia, SpotifyEpisodeMedia, SpotifyArtist
+from ..core.mediaitem import SpotifyPlaylist, SpotifyTrackMedia, SpotifyEpisodeMedia, SpotifyArtist, SpotifyAlbum
 from ..common.utils import pick_thumbnail, GENRES
 from librespot.zeroconf import ZeroconfServer
 from librespot.proto import Connect_pb2 as Connect
@@ -586,6 +586,50 @@ class SpotifyUser:
                 yield track
             my_liked_api = my_liked_info.get('next', '')
             if my_liked_api is None or my_liked_api == '':
+                break
+
+    @property
+    def liked_albums(self) -> list[SpotifyAlbum]:
+        my_liked_albums_api: Union[str, None] = 'https://api.spotify.com/v1/me/albums'
+        while True:
+            my_liked_albums_info: dict = json.loads(
+                requests.get(my_liked_albums_api, headers=self.req_header_scoped('user-library-read')).content
+            )
+            for album_item in my_liked_albums_info['items']:
+                album = SpotifyAlbum(
+                    album_id=album_item['album']['id'],
+                    user=self,  # TODO: Fix http cache
+                )
+                album._covers = album_item['album']['images']
+                try:
+                    album.set_partial_meta({
+                        'artists': [
+                            data['name']
+                            for data in
+                            album_item['album']['artists']
+                        ],
+                        'name': album_item['album']['name'],
+                        'url': album_item['album']['external_urls']['spotify'],
+                        'artist_url': album_item['album']['artists'][0]['external_urls']['spotify'],
+                        'artist_id': album_item['album']['artists'][0]['id'],
+                        'thumbnail_url': pick_thumbnail(album_item['album']['images'], preferred_size=640000),
+                        'release_year': int(album_item['album']['release_date'].split("-")[0]),
+                        'release_month': int(album_item['album']['release_date'].split("-")[1]),
+                        'release_day': int(album_item['album']['release_date'].split("-")[2]),
+                        'total_tracks': int(album_item['album']['total_tracks']),
+                        'scraped_id': album_item['album']['id'],
+                        'upc': album_item['album']['external_ids'].get('upc', None),
+                        'ean': album_item['album']['external_ids'].get('ean', None),
+                        'popularity': album_item['album']['popularity'],
+                    })
+                except Exception as e:
+                    print(e)
+                    print(album_item)
+                    continue
+
+                yield album
+            my_liked_albums_api = my_liked_albums_info.get('next', '')
+            if my_liked_albums_api is None or my_liked_albums_api == '':
                 break
 
     @property
