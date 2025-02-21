@@ -545,10 +545,15 @@ class SpotifyUser:
                 track = SpotifyTrackMedia(
                     track_id=track_item['track']['id'],
                     user=self,  # TODO: Fix http cache
-
                 )
+                # TODO: Kieran, hmmmmm this is just a mistake???
+                # print(track_item)
                 track._covers = track_item['track']['album']['images']
-                date_segments: list = track_item['album']['release_date'].split("-")
+                try:
+                    date_segments: list = track_item['album']['release_date'].split("-")
+                except KeyError:
+                    print("KEY ERROR, recovering")
+                    date_segments: list = track_item['track']['album']['release_date'].split("-")
                 track.set_partial_meta({
                     'artists': [
                         data['name']
